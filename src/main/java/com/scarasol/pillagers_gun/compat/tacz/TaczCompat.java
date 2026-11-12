@@ -1,0 +1,236 @@
+package com.scarasol.pillagers_gun.compat.tacz;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.scarasol.pillagers_gun.config.CommonConfig;
+import com.scarasol.pillagers_gun.entity.goal.controller.EmptyGunController;
+import com.scarasol.pillagers_gun.entity.goal.controller.GunController;
+import com.scarasol.pillagers_gun.event.EventHandler;
+import com.scarasol.pillagers_gun.init.PillagersGunItems;
+import com.scarasol.pillagers_gun.util.WeightedRandom;
+import com.tacz.guns.api.TimelessAPI;
+import com.tacz.guns.api.item.IGun;
+import com.tacz.guns.resource.index.CommonGunIndex;
+import com.tacz.guns.resource.pojo.data.gun.FeedType;
+import com.tacz.guns.sound.SoundManager;
+import com.tacz.guns.util.AttachmentDataUtils;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+public class TaczCompat {
+
+    public static final ItemStack SHOTGUN;
+    public static final ItemStack ASSAULT_RIFLE;
+    public static final ItemStack PISTOL;
+    public static final ItemStack SNIPERS_RIFLE;
+    public static final ItemStack BAZOOKA;
+
+    public static final Map<Item, ItemStack> GUN_SWITCH = Maps.newHashMap();
+    public static final Map<String, Double> GUN_INACCURACY = Maps.newHashMap();
+    public static final Map<ResourceLocation, Double> SPAWN_GUN = Maps.newHashMap();
+    public static double totalWeight = 0;
+    private static boolean spawnGunLoaded = false;
+
+    static {
+        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse("tacz:modern_kinetic_gun"));
+        SHOTGUN = new ItemStack(item);
+        ASSAULT_RIFLE = new ItemStack(item);
+        PISTOL = new ItemStack(item);
+        SNIPERS_RIFLE = new ItemStack(item);
+        BAZOOKA = new ItemStack(item);
+        if (item instanceof IGun gun) {
+            gun.setGunId(PISTOL, ResourceLocation.parse("tacz:m1911"));
+            gun.setGunId(SHOTGUN, ResourceLocation.parse("tacz:m870"));
+            gun.setGunId(ASSAULT_RIFLE, ResourceLocation.parse("tacz:ak47"));
+            gun.setGunId(SNIPERS_RIFLE, ResourceLocation.parse("tacz:ai_awp"));
+            gun.setGunId(BAZOOKA, ResourceLocation.parse("tacz:rpg7"));
+        }
+        GUN_SWITCH.put(PillagersGunItems.SHOTGUN.get(), SHOTGUN);
+        GUN_SWITCH.put(PillagersGunItems.ASSAULT_RIFLE.get(), ASSAULT_RIFLE);
+        GUN_SWITCH.put(PillagersGunItems.PISTOL.get(), PISTOL);
+        GUN_SWITCH.put(PillagersGunItems.SNIPERS_RIFLE.get(), SNIPERS_RIFLE);
+        GUN_SWITCH.put(PillagersGunItems.BAZOOKA.get(), BAZOOKA);
+    }
+
+    public static void playSound(ItemStack itemStack, LivingEntity shooter) {
+        if (itemStack.getItem() instanceof IGun gun) {
+            String soundId = SoundManager.SHOOT_3P_SOUND;
+            SoundManager.sendSoundToNearby(shooter, 64, gun.getGunId(itemStack), gun.getGunDisplayId(itemStack), soundId, 0.8F, 0.9F + shooter.getRandom().nextFloat() * 0.125F);
+        }
+    }
+
+    public static ItemStack itemStackSwitch(ItemStack itemStack) {
+        return GUN_SWITCH.getOrDefault(itemStack.getItem(), itemStack);
+    }
+
+    public static void changeEquipmentTo(LivingEquipmentChangeEvent event) {
+        zoomAttributeModifier(event.getTo(), event.getEntity());
+    }
+
+    public static double getZoomAttribute(ItemStack itemStack) {
+        IGun gun = IGun.getIGunOrNull(itemStack);
+        if (gun == null) {
+            return 0;
+        }
+        try {
+            return gun.getAimingZoom(itemStack) / 2f - 1;
+        } catch (RuntimeException | LinkageError ignored) {
+            return 0;
+        }
+    }
+
+    public static void zoomAttributeModifier(ItemStack itemStack, LivingEntity shooter) {
+        AttributeInstance attributeInstance = shooter.getAttributes().getInstance(Attributes.FOLLOW_RANGE);
+        if (attributeInstance == null) {
+            return;
+        }
+        attributeInstance.removeModifier(EventHandler.ATTRIBUTE_MODIFIER_ID);
+
+        double aimingZoom = getZoomAttribute(itemStack);
+        if (aimingZoom > 0) {
+            AttributeModifier attributeModifier = new AttributeModifier(EventHandler.ATTRIBUTE_MODIFIER_ID, aimingZoom, AttributeModifier.Operation.ADD_MULTIPLIED_BASE);
+            attributeInstance.addPermanentModifier(attributeModifier);
+        }
+    }
+
+    public static String getGunType(ItemStack gunItem) {
+        IGun iGun = IGun.getIGunOrNull(gunItem);
+        if (iGun == null) {
+            return "";
+        }
+        return TimelessAPI.getCommonGunIndex(iGun.getGunId(gunItem))
+                .map(CommonGunIndex::getType)
+                .orElse("");
+    }
+
+    public static boolean isSameGun(ItemStack first, ItemStack second) {
+        if (first.isEmpty() || second.isEmpty() || !first.is(second.getItem())) {
+            return false;
+        }
+        IGun firstGun = IGun.getIGunOrNull(first);
+        IGun secondGun = IGun.getIGunOrNull(second);
+        if (firstGun == null || secondGun == null) {
+            return false;
+        }
+        return firstGun.getGunId(first).equals(secondGun.getGunId(second));
+    }
+
+
+    public static double getInaccuracy(String type, double originalValue) {
+        if (GUN_INACCURACY.isEmpty()) {
+            for (String info : CommonConfig.TACZ_GUN_INACCURACY.get()) {
+                String[] inaccuracy = info.trim().split(",");
+                if (inaccuracy.length < 2) {
+                    continue;
+                }
+                GUN_INACCURACY.put(inaccuracy[0], Double.parseDouble(inaccuracy[1]));
+            }
+        }
+        return GUN_INACCURACY.getOrDefault(type, originalValue);
+    }
+
+    public static boolean spawnWithTaczGun(Mob mob) {
+        loadSpawnGunConfig();
+        Optional<ResourceLocation> gunId = WeightedRandom.pick(mob.getRandom(), getSpawnGunEntries());
+        if (gunId.isEmpty()) {
+            return false;
+        }
+
+        Item item = BuiltInRegistries.ITEM.get(ResourceLocation.parse("tacz:modern_kinetic_gun"));
+        if (item instanceof IGun iGun) {
+            ItemStack itemStack = new ItemStack(item);
+            return TimelessAPI.getCommonGunIndex(gunId.get()).map(commonGunIndex -> {
+                iGun.setGunId(itemStack, gunId.get());
+                int maxAmmoCount = AttachmentDataUtils.getAmmoCountWithAttachment(itemStack, commonGunIndex.getGunData());
+                iGun.setCurrentAmmoCount(itemStack, maxAmmoCount <= 0 ? 0 : mob.getRandom().nextInt(maxAmmoCount));
+                iGun.setFireMode(itemStack, commonGunIndex.getGunData().getFireModeSet().get(0));
+                iGun.setBulletInBarrel(itemStack, true);
+                if (CommonConfig.TACZ_GUNNERS_NEED_AMMO.get()) {
+                    double ammoMultiplier = nextDouble(mob.getRandom(), CommonConfig.GUARD_TACZ_GUN_MIN_AMMO.get(), CommonConfig.GUARD_TACZ_GUN_MAX_AMMO.get());
+                    if (iGun.useInventoryAmmo(itemStack)) {
+                        iGun.setDummyAmmoAmount(itemStack, (int) (ammoMultiplier * 40));
+                    } else if (commonGunIndex.getGunData().getReloadData().getType() == FeedType.FUEL) {
+                        iGun.setDummyAmmoAmount(itemStack, (int) ammoMultiplier);
+                    } else {
+                        iGun.setDummyAmmoAmount(itemStack, (int) (ammoMultiplier * maxAmmoCount));
+                    }
+                }
+                mob.setItemInHand(InteractionHand.MAIN_HAND, itemStack);
+                double dropChance = CommonConfig.DROP_CHANCE.get();
+                mob.setDropChance(EquipmentSlot.MAINHAND, (float) dropChance);
+                return true;
+            }).orElse(false);
+        }
+
+        return false;
+    }
+
+    private static void loadSpawnGunConfig() {
+        if (spawnGunLoaded) {
+            return;
+        }
+        spawnGunLoaded = true;
+        SPAWN_GUN.clear();
+        totalWeight = 0;
+        for (String info : CommonConfig.TACZ_GUN_TYPE.get()) {
+            String[] gunType = info.trim().split(",");
+            if (gunType.length < 2) {
+                continue;
+            }
+            try {
+                double weight = Double.parseDouble(gunType[1].trim());
+                if (weight > 0 && Double.isFinite(weight)) {
+                    ResourceLocation gunId = ResourceLocation.parse(gunType[0].trim());
+                    SPAWN_GUN.put(gunId, weight);
+                    totalWeight += weight;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
+    private static List<WeightedRandom.Entry<ResourceLocation>> getSpawnGunEntries() {
+        List<WeightedRandom.Entry<ResourceLocation>> entries = new ArrayList<>();
+        for (Map.Entry<ResourceLocation, Double> entry : SPAWN_GUN.entrySet()) {
+            entries.add(WeightedRandom.entry(entry.getKey(), entry.getValue()));
+        }
+        return entries;
+    }
+
+    private static double nextDouble(RandomSource random, double min, double max) {
+        double lower = Math.min(min, max);
+        double upper = Math.max(min, max);
+        return lower + random.nextDouble() * (upper - lower);
+    }
+
+    public static boolean isSniperGun(ItemStack gunItem) {
+        return "sniper".equals(getGunType(gunItem));
+    }
+
+    public static boolean shouldRenderLaser(ItemStack gunItem) {
+
+        return CommonConfig.TACZ_RENDER_LASER.get().contains(getGunType(gunItem));
+
+    }
+
+    public static GunController createGunController(Mob mob) {
+        GunController controller = new TaczGunController(mob);
+        return controller.isValid() ? controller : EmptyGunController.INSTANCE;
+    }
+}

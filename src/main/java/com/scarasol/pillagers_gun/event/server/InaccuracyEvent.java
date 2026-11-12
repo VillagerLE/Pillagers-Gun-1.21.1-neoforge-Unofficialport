@@ -1,0 +1,51 @@
+package com.scarasol.pillagers_gun.event.server;
+
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.bus.api.Event;
+
+/**
+ * @author Administrator
+ */
+public class InaccuracyEvent extends Event {
+
+    private float newInaccuracy;
+
+    private final float oldInaccuracy;
+    private final Mob shooter;
+    private final Entity target;
+    private final Vec3 targetLastPosition;
+
+    public InaccuracyEvent(float oldInaccuracy, Mob shooter, Entity target, Vec3 targetLastPosition) {
+        this.oldInaccuracy = oldInaccuracy;
+        this.shooter = shooter;
+        this.target = target;
+        this.targetLastPosition = targetLastPosition;
+        this.newInaccuracy = oldInaccuracy;
+    }
+
+    public float getNewInaccuracy() {
+        return newInaccuracy;
+    }
+
+    public void setNewInaccuracy(float newInaccuracy) {
+        this.newInaccuracy = newInaccuracy;
+    }
+
+    public float getOldInaccuracy() {
+        return oldInaccuracy;
+    }
+
+    public Mob getShooter() {
+        return shooter;
+    }
+
+    public Entity getTarget() {
+        return target;
+    }
+
+    public Vec3 getTargetLastPosition() {
+        return targetLastPosition;
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "replace": false,
+  "values": [
+    {
+      "id": "minecraft:pillager",
+      "required": false
+    },
+    {
+      "id": "guardvillagers:guard",
+      "required": false
+    }
+  ]
+}
