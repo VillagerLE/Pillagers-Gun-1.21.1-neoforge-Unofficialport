@@ -10,6 +10,9 @@ build/
 *.iml
 *.ipr
 out/
+
+### Local tool config ###
+.claude/
 !**/src/**/out/
 
 .run/
